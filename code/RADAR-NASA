@@ -1,0 +1,213 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var roi = /* color: #ff0505 */ee.Geometry.LinearRing(
+        [[36.45916701865701, -18.550609519104203],
+         [34.17401076865701, -21.502298433346265],
+         [32.19647170615701, -20.630886094431084],
+         [33.51483108115701, -19.039431524605742],
+         [34.09710647178201, -17.02333332217362],
+         [36.45916701865701, -18.550609519104203]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+/* FUENTE: El código fue elaborado y mostrado por el webinar de la NASA llamado 
+
+            "SAR para el Mapeo de Inundaciones Utilizando Google Earth Engine"
+           Este mismo fue adaptado y modificado por el grupo GEOgraphyTeam :3 
+
+   LINK  :      https://arset.gsfc.nasa.gov/disasters/webinars/2019-SAR/es
+
+*/
+
+// Cargando toda la colección de Img Sentinel 1 a GEE
+
+var coleccionVV = ee.ImageCollection('COPERNICUS/S1_GRD')
+                  .filter(ee.Filter.eq('instrumentMode','IW')) 
+                  .filter(ee.Filter.listContains('transmitterReceiverPolarisation','VV'))
+                  .filter(ee.Filter.eq('orbitProperties_pass','DESCENDING'))
+                  .filterMetadata('resolution_meters','equals',10)
+                  .filterBounds(roi)
+                  .select('VV');
+
+// print(coleccionVV,'coleccionVV');
+
+
+var coleccionVH = ee.ImageCollection('COPERNICUS/S1_GRD')
+                  .filter(ee.Filter.eq('instrumentMode','IW')) 
+                  .filter(ee.Filter.listContains('transmitterReceiverPolarisation','VH'))
+                  .filter(ee.Filter.eq('orbitProperties_pass','DESCENDING'))
+                  .filterMetadata('resolution_meters','equals',10)
+                  .filterBounds(roi)
+                  .select('VH');
+
+// print(coleccionVH,'coleccionVH');
+
+// Filtrar datos por una fecha específica 
+
+/*
+var beforeVV = coleccionVV.filterDate('2019-02-15','2019-02-24');
+var afterVV  = coleccionVV.filterDate('2019-03-15','2019-03-21');
+
+var beforeVH = coleccionVH.filterDate('2019-02-15','2019-02-24');
+var afterVH  = coleccionVH.filterDate('2019-03-15','2019-03-21');
+
+print(beforeVV,'beforeVV');
+print(afterVV,'afterVV');
+print(beforeVH,'beforeVH');
+print(afterVH,'afterVH');
+*/
+
+// Función para crear mostar las imágenes al addmap
+
+/*
+function addImage(image){
+              var id = image.id;
+              var imagen = ee.Image(image.id);
+              Map.addLayer(imagen);
+              } 
+              beforeVV.evaluate(function(beforeVV){
+              beforeVV.features.map(addImage)
+              })
+*/
+
+// Visualizar mosaicos de sentinel 1 
+
+var beforeVV = coleccionVV.filterDate('2019-02-15','2019-02-24').mosaic();
+var afterVV  = coleccionVV.filterDate('2019-03-15','2019-03-21').mosaic();
+
+var beforeVH = coleccionVH.filterDate('2019-02-15','2019-02-24').mosaic();
+var afterVH  = coleccionVH.filterDate('2019-03-15','2019-03-21').mosaic();
+
+// Visualizar los mosaicos elaborados a addmap 
+
+Map.centerObject(roi,7);
+
+Map.addLayer(beforeVV,{min:-15,max:0},'Antes de la inundación VV',0);
+Map.addLayer(afterVV,{min:-15,max:0},'Después de la inundación VV',0);
+Map.addLayer(beforeVH,{min:-25,max:0},'Antes de la inundación VH',0);
+Map.addLayer(afterVH,{min:-25,max:0},'Después de la inundación VH',0);
+
+// Visualización en RGB 
+
+/*
+
+var circle = ee.Geometry.Point([34.5827, -19.8878]).buffer(600000000);
+Map.addLayer(beforeVH.clip(circle)
+                    .addBands(afterVH)
+                    .addBands(beforeVH)
+                    ,{min:-25,max:-8}
+                    ,'BVH/AVV/AVH composite'
+                    ,0);
+
+*/
+
+Map.addLayer(beforeVH.addBands(afterVH)
+                    .addBands(beforeVH)
+                    ,{min:-25,max:-8}
+                    ,'BVH/AVV/AVH composite'
+                    ,0);
+
+
+
+// Aplicar un filtro de Speckle
+
+var Smoothing_radius  = 50;
+
+var beforeVV_filtered = beforeVV.focal_mean(Smoothing_radius,'circle','meters');
+var beforeVH_filtered = beforeVH.focal_mean(Smoothing_radius,'circle','meters');
+var afterVV_filtered  = afterVV.focal_mean(Smoothing_radius,'circle','meters');
+var afterVH_filtered  = afterVH.focal_mean(Smoothing_radius,'circle','meters');
+
+
+// Visualización de las img suavizadas
+
+Map.addLayer(beforeVV_filtered, {min:-15,max:0}, 'Before Flood VV Filtered',0);
+Map.addLayer(beforeVH_filtered, {min:-25,max:0}, 'Before Flood VH Filtered',0);
+Map.addLayer(afterVV_filtered, {min:-15,max:0}, 'After Flood VV Filtered',0);
+Map.addLayer(afterVH_filtered, {min:-25,max:0}, 'After Flood VH Filtered',0);
+
+
+// Calcular el area de inundación 
+
+var diferenciaVH = afterVH_filtered.divide(beforeVH_filtered);
+
+Map.addLayer(diferenciaVH, {min: 0,max:2},'difference VH filtered', 0);
+
+
+// Apply Threshold
+
+var DIFF_UPPER_THRESHOLD = 1.25;
+
+var diferenciaVH_thresholded = diferenciaVH.gt(DIFF_UPPER_THRESHOLD);
+Map.addLayer(diferenciaVH_thresholded
+             .updateMask(diferenciaVH_thresholded)
+             ,{palette:"0000FF"}
+             ,'flooded areas - blue'
+             ,0);
+
+
+
+/* COMPARADOR SENTINEL SEPTIEMBRE-AGOSTO 2019 */
+
+var Comparador = ui.Map();
+Map.addLayer(beforeVH.addBands(afterVH)
+                    .addBands(beforeVH)
+                    ,{min:-25,max:-8}
+                    ,'BVH/AVV/AVH composite'
+                    ,1);
+                    
+Comparador.addLayer(diferenciaVH_thresholded
+             .updateMask(diferenciaVH_thresholded)
+             ,{palette:"0000FF"}
+             ,'flooded areas - blue'
+             ,1); 
+
+var SWIPE = ui.Map.Linker([ui.root.widgets().get(0), Comparador]);
+var SWIPE2 = ui.SplitPanel({
+  firstPanel: SWIPE.get(0),
+  secondPanel: SWIPE.get(1),
+  orientation: 'horizontal', // Cambio a horizontal o vertical
+  wipe: true,
+  style: {stretch: 'both'}});
+ui.root.widgets().reset([SWIPE2]);
+Map.setCenter(34.1401,-19.996, 8);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
